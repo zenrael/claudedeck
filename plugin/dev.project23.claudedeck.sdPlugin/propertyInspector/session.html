@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<script>
+			let update = () => {};
+
+			function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+				const ws = new WebSocket("ws://localhost:" + inPort);
+				inActionInfo = JSON.parse(inActionInfo);
+				const ctx = inActionInfo.context;
+				const action = inActionInfo.action;
+				const s = inActionInfo.payload.settings || {};
+
+				const directory = document.getElementById("directory");
+				const terminal = document.getElementById("terminal");
+				const font = document.getElementById("font");
+				const fontsize = document.getElementById("fontsize");
+				const threshold = document.getElementById("threshold");
+				const titlemode = document.getElementById("titlemode");
+				const scrollsecs = document.getElementById("scrollsecs");
+				const scrollspeed = document.getElementById("scrollspeed");
+				const textsize = document.getElementById("textsize");
+				const claudeargs = document.getElementById("claudeargs");
+				const sparklecolor = document.getElementById("sparklecolor");
+				const prerun = document.getElementById("prerun");
+
+				directory.value = s.directory ?? "";
+				terminal.value = s.terminal || "kitty";
+				fontsize.value = s.font_size ?? "";
+				threshold.value = s.threshold ?? "";
+				titlemode.value = s.title_mode || "scroll";
+				scrollsecs.value = s.scroll_secs ?? "";
+				scrollspeed.value = s.scroll_speed ?? "";
+				textsize.value = s.font_px ?? "";
+				claudeargs.value = s.claude_args ?? "";
+				sparklecolor.value = s.sparkle_color ?? "";
+				prerun.value = s.prerun ?? "";
+				const savedFont = s.font ?? "";
+
+				const populateFonts = (fonts) => {
+					const keep = font.value || savedFont || "";
+					font.innerHTML = "";
+					const def = document.createElement("option");
+					def.value = "";
+					def.textContent = "(terminal default)";
+					font.appendChild(def);
+					for (const f of fonts) {
+						const o = document.createElement("option");
+						o.value = f;
+						o.textContent = f;
+						font.appendChild(o);
+					}
+					font.value = keep;
+				};
+
+				ws.onopen = () => {
+					ws.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
+					// Ask the plugin for the system's monospace fonts.
+					ws.send(JSON.stringify({
+						event: "sendToPlugin",
+						action: action,
+						context: ctx,
+						payload: { request: "fonts" },
+					}));
+				};
+
+				ws.onmessage = (e) => {
+					let data;
+					try { data = JSON.parse(e.data); } catch { return; }
+					if (data.event === "sendToPropertyInspector" && data.payload && Array.isArray(data.payload.fonts)) {
+						populateFonts(data.payload.fonts);
+					}
+				};
+
+				update = () => {
+					ws.send(JSON.stringify({
+						event: "setSettings",
+						context: ctx,
+						payload: {
+							directory: directory.value,
+							terminal: terminal.value,
+							font: font.value,
+							font_size: fontsize.value,
+							threshold: threshold.value,
+							title_mode: titlemode.value,
+							scroll_secs: scrollsecs.value,
+							scroll_speed: scrollspeed.value,
+							font_px: textsize.value,
+							claude_args: claudeargs.value,
+							sparkle_color: sparklecolor.value,
+							prerun: prerun.value,
+						},
+					}));
+				};
+			}
+		</script>
+		<link rel="stylesheet" href="sdpi.css" />
+	</head>
+	<body>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Directory</div>
+			<input id="directory" class="sdpi-item-value" placeholder="$HOME" oninput="update()" style="font-family: monospace" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Terminal</div>
+			<select id="terminal" class="sdpi-item-value" onchange="update()">
+				<option value="kitty">kitty</option>
+				<option value="alacritty">alacritty</option>
+			</select>
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Font</div>
+			<select id="font" class="sdpi-item-value" onchange="update()">
+				<option value="">(terminal default)</option>
+			</select>
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Font size</div>
+			<input id="fontsize" type="number" min="4" max="72" class="sdpi-item-value" placeholder="default" oninput="update()" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Warn threshold %</div>
+			<input id="threshold" type="number" min="1" max="100" class="sdpi-item-value" placeholder="60" oninput="update()" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Title</div>
+			<select id="titlemode" class="sdpi-item-value" onchange="update()">
+				<option value="scroll">scroll</option>
+				<option value="short">short</option>
+			</select>
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Scroll every (s)</div>
+			<input id="scrollsecs" type="number" min="0" max="3600" class="sdpi-item-value" placeholder="0 = continuous" oninput="update()" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Scroll speed</div>
+			<input id="scrollspeed" type="number" min="2" max="400" class="sdpi-item-value" placeholder="28 px/s" oninput="update()" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Text size</div>
+			<input id="textsize" type="number" min="6" max="28" class="sdpi-item-value" placeholder="14" oninput="update()" />
+		</div>
+		<div class="sdpi-item">
+			<div class="sdpi-item-label">Claude args</div>
+			<input id="claudeargs" class="sdpi-item-value" placeholder="--model opus …" oninput="update()" style="font-family: monospace" />
+		</div>
+		<div class="sdpi-item">
+				<div class="sdpi-item-label">Sparkle colour</div>
+				<select id="sparklecolor" class="sdpi-item-value" onchange="update()">
+					<option value="">Default (coral)</option>
+					<option value="blue">Blue</option>
+					<option value="periwinkle">Periwinkle</option>
+					<option value="red">Red</option>
+					<option value="green">Green</option>
+					<option value="amber">Amber</option>
+				</select>
+			</div>
+			<div class="sdpi-item">
+				<div class="sdpi-item-label">Pre-run command</div>
+				<input id="prerun" class="sdpi-item-value" placeholder="e.g. source ./.env" oninput="update()" style="font-family: monospace" />
+			</div>
+			<p style="padding: 0 0.75rem; opacity: 0.7">
+			Applies to newly-launched sessions. Re-press a key (after closing its window) to start a fresh session with new settings.
+		</p>
+	</body>
+</html>

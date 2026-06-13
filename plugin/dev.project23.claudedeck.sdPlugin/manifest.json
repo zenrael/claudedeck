@@ -1,0 +1,28 @@
+{
+  "Name": "ClaudeDeck",
+  "Author": "project23",
+  "Version": "0.2.0",
+  "Description": "Launch and focus Claude Code terminal sessions from your Stream Deck.",
+  "Category": "ClaudeDeck",
+  "Icon": "assets/icon",
+  "CodePaths": {
+    "x86_64-unknown-linux-gnu": "claudedeck-x86_64-unknown-linux-gnu"
+  },
+  "CodePathLin": "claudedeck-x86_64-unknown-linux-gnu",
+  "OS": [
+    { "Platform": "linux" }
+  ],
+  "Actions": [
+    {
+      "UUID": "dev.project23.claudedeck.session",
+      "Name": "Claude Session",
+      "Icon": "assets/claude-placeholder",
+      "Tooltip": "Press to open a Claude Code session; press again to focus its window.",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "propertyInspector/session.html",
+      "States": [
+        { "Image": "assets/claude-placeholder" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+/target
+
+# Compiled plugin binary — rebuilt + staged by install.sh
+plugin/dev.project23.claudedeck.sdPlugin/claudedeck-x86_64-unknown-linux-gnu
