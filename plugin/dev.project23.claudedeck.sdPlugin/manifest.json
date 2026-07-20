@@ -1,7 +1,7 @@
 {
   "Name": "ClaudeDeck",
   "Author": "project23",
-  "Version": "0.3.0",
+  "Version": "0.4.0",
   "Description": "Launch and focus Claude Code terminal sessions from your Stream Deck.",
   "Category": "ClaudeDeck",
   "Icon": "assets/icon",

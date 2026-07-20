@@ -309,6 +309,61 @@ async fn list_monospace_fonts() -> Vec<String> {
     set.into_iter().collect()
 }
 
+/// systemd/runtime-injected vars that must not leak into the transient unit we
+/// create (they belong to OpenDeck's own unit, not the terminal's).
+const ENV_BLOCKLIST: &[&str] = &[
+    "INVOCATION_ID", "JOURNAL_STREAM", "MANAGERPID", "NOTIFY_SOCKET",
+    "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "SYSTEMD_EXEC_PID",
+    "WATCHDOG_PID", "WATCHDOG_USEC", "MEMORY_PRESSURE_WATCH", "MEMORY_PRESSURE_WRITE",
+];
+
+fn systemd_run_bin() -> Option<&'static str> {
+    ["/usr/bin/systemd-run", "/bin/systemd-run"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+}
+
+/// Wrap a terminal invocation so it launches **detached** in its own transient
+/// `systemd --user` service — a fresh cgroup off OpenDeck's, so an OpenDeck
+/// stop/restart (its unit is KillMode=control-group) can't take the session down
+/// with it. The plugin's environment is carried across so the terminal + claude
+/// see what they'd see as a direct child. Focus + state tracking are unaffected:
+/// both key off the window's `--class` app-id via kdotool (oblivious to process/
+/// cgroup topology) and the status file in $XDG_RUNTIME_DIR (path unchanged), so
+/// a fresh plugin re-attaches to a surviving session automatically. Falls back to
+/// a direct child spawn where systemd-run isn't present.
+fn detached_command(
+    term_argv: &[String],
+    dir: &str,
+    extra_env: &[(&str, String)],
+) -> tokio::process::Command {
+    if let Some(sr) = systemd_run_bin() {
+        let mut cmd = tokio::process::Command::new(sr);
+        cmd.args(["--user", "--quiet", "--collect"]);
+        cmd.arg(format!("--working-directory={dir}"));
+        for (k, v) in std::env::vars() {
+            if ENV_BLOCKLIST.contains(&k.as_str()) || k.contains('\n') || v.contains('\n') {
+                continue;
+            }
+            cmd.arg(format!("--setenv={k}={v}"));
+        }
+        for (k, v) in extra_env {
+            cmd.arg(format!("--setenv={k}={v}"));
+        }
+        cmd.arg("--");
+        cmd.args(term_argv);
+        cmd
+    } else {
+        let mut cmd = tokio::process::Command::new(&term_argv[0]);
+        cmd.args(&term_argv[1..]);
+        cmd.current_dir(dir);
+        for (k, v) in extra_env {
+            cmd.env(k, v);
+        }
+        cmd
+    }
+}
+
 fn build_launch_command(app_id: &str, settings: &Settings) -> tokio::process::Command {
     let home = home();
     let claude_settings = format!("{home}/.local/share/claudedeck/session-settings.json");
@@ -336,27 +391,32 @@ fn build_launch_command(app_id: &str, settings: &Settings) -> tokio::process::Co
     let extra: Vec<&str> = settings.claude_args.split_whitespace().collect();
     let prerun = settings.prerun.trim();
 
-    let mut cmd = tokio::process::Command::new(terminal);
-    cmd.arg("--class").arg(app_id);
+    // Build the terminal argv: terminal + its options + the program to run.
+    let mut argv: Vec<String> =
+        vec![terminal.to_string(), "--class".to_string(), app_id.to_string()];
 
     // Terminal font options (terminal-specific syntax); alacritty also needs `-e`
     // before the program it should run.
     match terminal {
         "alacritty" => {
             if !font.is_empty() {
-                cmd.arg("-o").arg(format!("font.normal.family=\"{font}\""));
+                argv.push("-o".into());
+                argv.push(format!("font.normal.family=\"{font}\""));
             }
             if size_ok {
-                cmd.arg("-o").arg(format!("font.size={size}"));
+                argv.push("-o".into());
+                argv.push(format!("font.size={size}"));
             }
-            cmd.arg("-e");
+            argv.push("-e".into());
         }
         _ => {
             if !font.is_empty() {
-                cmd.arg("-o").arg(format!("font_family={font}"));
+                argv.push("-o".into());
+                argv.push(format!("font_family={font}"));
             }
             if size_ok {
-                cmd.arg("-o").arg(format!("font_size={size}"));
+                argv.push("-o".into());
+                argv.push(format!("font_size={size}"));
             }
         }
     }
@@ -364,15 +424,20 @@ fn build_launch_command(app_id: &str, settings: &Settings) -> tokio::process::Co
     // With a pre-run command, go through `bash -c` so the user can e.g. `source ./.env`;
     // otherwise exec claude directly (no shell).
     if prerun.is_empty() {
-        cmd.arg("claude").args(&extra).arg("--settings").arg(&claude_settings);
+        argv.push("claude".into());
+        argv.extend(extra.iter().map(|s| s.to_string()));
+        argv.push("--settings".into());
+        argv.push(claude_settings);
     } else {
         let shell_cmd =
             format!("{prerun} && exec claude {} --settings '{claude_settings}'", extra.join(" "));
-        cmd.arg("bash").arg("-c").arg(shell_cmd);
+        argv.push("bash".into());
+        argv.push("-c".into());
+        argv.push(shell_cmd);
     }
 
-    cmd.current_dir(&dir).env("CLAUDEDECK_KEY", app_id);
-    cmd
+    // Launch detached in its own systemd scope so an OpenDeck restart can't kill the session.
+    detached_command(&argv, &dir, &[("CLAUDEDECK_KEY", app_id.to_string())])
 }
 
 async fn launch_session(app_id: &str, settings: &Settings) {
